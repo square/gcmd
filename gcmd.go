@@ -1,24 +1,26 @@
 package gcmd
 
 import (
-	"os/exec"
 	"bufio"
 	"fmt"
-	"sync"
+	"os/exec"
 	"strings"
+	"sync"
 )
 
-type StdoutHandlerFunc func(o []byte)
-type StderrHandlerFunc func(e []byte)
-type ExitHandlerFunc   func(exit int)
+type StdoutHandlerFunc func(node string, o string)
+type StderrHandlerFunc func(node string, e string)
+type ExitHandlerFunc func(node string, exit error)
 
 type Gcmd struct {
-	Timeout   int
-	Maxflight int
-	command   string
-	command_args []string
-	nodes     []string
-	remaining int
+	Maxflight     int
+	StdoutHandler StdoutHandlerFunc
+	StderrHandler StderrHandlerFunc
+	ExitHandler   ExitHandlerFunc
+	command       string
+	command_args  []string
+	nodes         []string
+	remaining     int
 }
 
 func New(nodes []string, command string, command_args ...string) *Gcmd {
@@ -26,6 +28,24 @@ func New(nodes []string, command string, command_args ...string) *Gcmd {
 	g.nodes = nodes
 	g.command = command
 	g.command_args = command_args
+	// default handler functions
+	g.StdoutHandler = func(node string, o string) {
+		fmt.Printf("%s:stdout:%s\n", node, string(o))
+	}
+
+	g.StderrHandler = func(node string, o string) {
+		fmt.Printf("%s:stderr:%s\n", node, string(o))
+	}
+
+	g.ExitHandler = func(node string, exit error) {
+		if exit != nil {
+			fmt.Printf("%s:failed:%s\n", node, exit.Error())
+			return
+		}
+		fmt.Printf("%s:success\n", node)
+		return
+	}
+
 	return g
 }
 
@@ -38,10 +58,9 @@ func (g *Gcmd) Run() {
 	var wg sync.WaitGroup
 
 	for g.remaining = len(g.nodes); g.remaining > 0; g.remaining-- {
-		fmt.Println("Remaining: ", g.remaining)
-		node := g.nodes[len(g.nodes) - g.remaining]
+		node := g.nodes[len(g.nodes)-g.remaining]
 		maxflightChan <- node
-		command_args := g.replaceMarker(node, g.command_args)
+		command_args := g.replaceMarker(node)
 
 		// run each process in a goroutine
 		wg.Add(1)
@@ -51,25 +70,25 @@ func (g *Gcmd) Run() {
 				<-maxflightChan
 			}()
 
-			fmt.Println("Executing: ", g.command, g.remaining, len(g.nodes))
 			cmd := exec.Command(g.command, command_args...)
 
 			// setup stdout pipe
 			stdout, err := cmd.StdoutPipe()
 			if err != nil {
-				g.ErrorHandler(node, err)
+				g.ExitHandler(node, err)
 				return
 			}
 
 			// setup stderr pipe
 			stderr, err := cmd.StderrPipe()
 			if err != nil {
-				g.ErrorHandler(node, err)
+				g.ExitHandler(node, err)
 				return
 			}
 
 			// run the command
 			if err = cmd.Start(); err != nil {
+				g.ExitHandler(node, err)
 				return
 			}
 
@@ -90,11 +109,12 @@ func (g *Gcmd) Run() {
 			go func() {
 				defer wg.Done()
 				for stderrScanner.Scan() {
-					g.StderrHandler(node, stdoutScanner.Text())
+					g.StderrHandler(node, stderrScanner.Text())
 				}
 			}()
 
 			if err = cmd.Wait(); err != nil {
+				g.ExitHandler(node, err)
 				return
 			}
 
@@ -106,11 +126,11 @@ func (g *Gcmd) Run() {
 // unexported methods
 
 // TODO: make replace marker configurable
-func (g *Gcmd) replaceMarker() []string {
+func (g *Gcmd) replaceMarker(node string) []string {
 	var command_args []string
 	for _, arg := range g.command_args {
 		command_args = append(command_args,
-		strings.Replace(arg, "__NODE__", node, -1))
+			strings.Replace(arg, "__NODE__", node, -1))
 	}
 	return command_args
 }
