@@ -113,10 +113,9 @@ func (g *Gcmd) Run() {
 				}
 			}()
 
-			if err = cmd.Wait(); err != nil {
-				g.ExitHandler(node, err)
-				return
-			}
+			err = cmd.Wait()
+			g.ExitHandler(node, err)
+			return
 
 		}()
 	}
