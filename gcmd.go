@@ -64,7 +64,7 @@ func (g *Gcmd) Run() {
 
 		// run each process in a goroutine
 		wg.Add(1)
-		go func() {
+		go func(node string) {
 			defer wg.Done()
 			defer func() {
 				<-maxflightChan
@@ -117,7 +117,7 @@ func (g *Gcmd) Run() {
 			g.ExitHandler(node, err)
 			return
 
-		}()
+		}(node)
 	}
 	wg.Wait()
 }
