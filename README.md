@@ -2,7 +2,7 @@ Usage
 ======
 
 ```go
-import "github.com/syamp/gcmd"
+import "github.com/square/gcmd"
 
 nodes = []string{"host1", "host2"}
 
